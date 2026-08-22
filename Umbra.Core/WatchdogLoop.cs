@@ -73,6 +73,25 @@ public static class WatchdogLoop
         private DateTime? _periodWindowStartUtc;
         private string? _periodWindowLabel;
 
+        // Verrou de confiance pour les plages hard mode : éditer periods.json
+        // à la main pendant qu'une plage bloque activement (désactiver,
+        // supprimer, ou simplement reculer son heure de fin) n'a plus d'effet
+        // tant que l'heure de fin légitimement observée n'est pas atteinte.
+        // Pas de porte de secours par code ici (volontairement, plus simple
+        // que ce qu'on avait testé) - la vraie échappatoire reste de fermer
+        // le watchdog élevé depuis le Gestionnaire des tâches (déjà le cas
+        // avant ce verrou, ça continue de marcher pareil). En mémoire
+        // seulement : un redémarrage du watchdog réinitialise la confiance,
+        // même compromis assumé qu'ailleurs dans cette classe.
+        private readonly Dictionary<string, TrustedHardPeriod> _trustedHardPeriods = new();
+
+        internal class TrustedHardPeriod
+        {
+            public required List<string> Apps;
+            public required List<string> Sites;
+            public required DateTime LockedUntil;
+        }
+
         private readonly Action<string> _notify; // "done" | "break" | "work"
 
         public Enforcer(Action<string> notify)
@@ -105,12 +124,14 @@ public static class WatchdogLoop
         {
             var s = Session.Load(); // fait aussi avancer les phases pomodoro dues
             var periodsData = Periods.Load();
-            var activePeriods = Periods.GetActivePeriods(periodsData, DateTime.Now);
+            var now = DateTime.Now;
+            var activePeriods = Periods.GetActivePeriods(periodsData, now);
             // Comme Session.IsBlockingActive pour une session manuelle : une
             // plage en PomodoroMode ne doit pas bloquer pendant sa pause,
             // même si elle reste "active" au sens fenêtre horaire (l'anneau
             // continue de tourner côté UI, seul le blocage s'arrête).
-            var blockingPeriods = activePeriods.Where(p => !p.PomodoroMode || !Periods.GetPomodoroTiming(p, DateTime.Now).IsBreak).ToList();
+            var blockingPeriods = activePeriods.Where(p => !p.PomodoroMode || !Periods.GetPomodoroTiming(p, now).IsBreak).ToList();
+            var phantomHardPeriods = ResolveHardLockedPeriods(periodsData, now);
             var sessionBlocking = Session.IsBlockingActive(s);
             // Indépendante de toute session/plage - "je ne veux jamais
             // pouvoir aller sur X" (voir AlwaysBlocklist). Un Load() de plus
@@ -118,7 +139,7 @@ public static class WatchdogLoop
             // aussi souvent dès qu'une session manuelle est active, sur un
             // fichier tout aussi petit.
             var always = AlwaysBlocklist.Load();
-            var shouldBlock = sessionBlocking || blockingPeriods.Count > 0 || always.Apps.Count > 0 || always.Sites.Count > 0;
+            var shouldBlock = sessionBlocking || blockingPeriods.Count > 0 || always.Apps.Count > 0 || always.Sites.Count > 0 || phantomHardPeriods.Count > 0;
 
             TrackPeriodHistory(s, activePeriods);
 
@@ -150,6 +171,11 @@ public static class WatchdogLoop
                 }
                 foreach (var a in always.Apps) apps.Add(a);
                 foreach (var st in always.Sites) sites.Add(st);
+                foreach (var p in phantomHardPeriods)
+                {
+                    foreach (var a in p.Apps) apps.Add(a);
+                    foreach (var st in p.Sites) sites.Add(st);
+                }
 
                 try
                 {
@@ -231,6 +257,41 @@ public static class WatchdogLoop
             _lastActive = s.Active;
             _lastKind = s.Kind;
             _lastPhase = curPhase;
+        }
+
+        // Plusieurs plages hard mode peuvent être verrouillées à la fois
+        // (clé = Period.Id, stable même si la plage est renommée ensuite).
+        // Retourne les plages "fantômes" - verrouillées en mémoire mais plus
+        // présentes/actives légitimement dans periods.json (désactivée,
+        // supprimée, horaire reculé...) - dont il faut quand même continuer
+        // à bloquer apps/sites jusqu'à l'heure de fin retenue.
+        internal List<TrustedHardPeriod> ResolveHardLockedPeriods(PeriodsData periodsData, DateTime now)
+        {
+            var seenIds = new HashSet<string>();
+            foreach (var p in periodsData.Periods)
+            {
+                if (!p.HardMode || !Periods.PeriodCoversNow(p, now)) continue;
+                seenIds.Add(p.Id);
+                var end = now.AddSeconds(Periods.GetTiming(p, now).RemainingSeconds);
+                if (!_trustedHardPeriods.TryGetValue(p.Id, out var trusted) || end >= trusted.LockedUntil)
+                {
+                    _trustedHardPeriods[p.Id] = new TrustedHardPeriod
+                    {
+                        Apps = new List<string>(p.Apps),
+                        Sites = new List<string>(p.Sites),
+                        LockedUntil = end,
+                    };
+                }
+            }
+
+            var phantoms = new List<TrustedHardPeriod>();
+            foreach (var (id, trusted) in _trustedHardPeriods.ToList())
+            {
+                if (seenIds.Contains(id)) continue; // toujours légitimement actif, rien à défendre
+                if (now < trusted.LockedUntil) phantoms.Add(trusted);
+                else _trustedHardPeriods.Remove(id); // engagement écoulé
+            }
+            return phantoms;
         }
 
         // Une session manuelle a sa propre fenêtre (Session.Stop / fin de
