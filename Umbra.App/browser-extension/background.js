@@ -33,6 +33,12 @@ function handleMessage(message) {
 }
 
 async function applyState(blocking, sites) {
+  // Une pause pomodoro (ou une session qui se termine) lève le blocage sans
+  // qu'on l'ait demandé depuis cet onglet - sans ce suivi, un onglet vidéo
+  // YouTube redirigé vers blocked.html au début du blocage restait bloqué
+  // pour de bon une fois la pause revenue, alors que le blocage lui-même
+  // était bien retombé côté app.
+  const wasBlocking = activeSites.length > 0;
   activeSites = blocking ? sites : [];
   const oldRules = await chrome.declarativeNetRequest.getDynamicRules();
   const addRules = activeSites.map((site, index) => ({
@@ -48,7 +54,11 @@ async function applyState(blocking, sites) {
     removeRuleIds: oldRules.map(rule => rule.id),
     addRules
   });
-  if (blocking) await redirectAlreadyOpenTabs();
+  if (blocking) {
+    await redirectAlreadyOpenTabs();
+  } else if (wasBlocking) {
+    await restoreBlockedTabs();
+  }
 }
 
 function escapeRegex(value) {
@@ -65,7 +75,25 @@ async function redirectAlreadyOpenTabs() {
   const tabs = await chrome.tabs.query({});
   for (const tab of tabs) {
     if (!tab.id || !tab.url || !matchingSite(tab.url)) continue;
-    await chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("blocked.html") });
+    const target = chrome.runtime.getURL("blocked.html") + "?from=" + encodeURIComponent(tab.url);
+    await chrome.tabs.update(tab.id, { url: target });
+  }
+}
+
+// Symétrique de redirectAlreadyOpenTabs : ramène chaque onglet actuellement
+// sur blocked.html à la page qu'il affichait avant d'être bloqué (retenue
+// dans le paramètre ?from, pas en mémoire de ce service worker - un service
+// worker MV3 peut être tué/relancé n'importe quand, la donnée doit survivre
+// à ça). Un onglet arrivé sur blocked.html via une tentative de navigation
+// pendant le blocage (pas via redirectAlreadyOpenTabs) n'a pas de ?from -
+// rien à restaurer pour lui, on le laisse tel quel.
+async function restoreBlockedTabs() {
+  const prefix = chrome.runtime.getURL("blocked.html");
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (!tab.id || !tab.url || !tab.url.startsWith(prefix)) continue;
+    const from = new URL(tab.url).searchParams.get("from");
+    if (from) await chrome.tabs.update(tab.id, { url: from });
   }
 }
 

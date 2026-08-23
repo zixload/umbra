@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Umbra Blocker",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Blocks distracting websites while Umbra focus protection is active.",
   "icons": {
     "16": "icons/icon16.png",
