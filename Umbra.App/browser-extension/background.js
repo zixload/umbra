@@ -1,8 +1,11 @@
 const HOST = "com.umbra.browser_blocker";
 let port;
+let nativeConnected = false;
 let activeSites = [];
+let currentSession = null;
 let reconnectTimer;
 const lastAttempts = new Map();
+const pendingRequests = new Map();
 
 function connect() {
   clearTimeout(reconnectTimer);
@@ -11,6 +14,13 @@ function connect() {
     port.onMessage.addListener(handleMessage);
     port.onDisconnect.addListener(() => {
       port = null;
+      nativeConnected = false;
+      currentSession = null;
+      for (const pending of pendingRequests.values()) {
+        clearTimeout(pending.timeout);
+        pending.sendResponse({ ok: false, error: "notConnected" });
+      }
+      pendingRequests.clear();
       applyState(false, []);
       reconnectTimer = setTimeout(connect, 3000);
     });
@@ -27,7 +37,15 @@ function requestState() {
 }
 
 function handleMessage(message) {
+  if (message?.requestId && pendingRequests.has(message.requestId)) {
+    const pending = pendingRequests.get(message.requestId);
+    clearTimeout(pending.timeout);
+    pendingRequests.delete(message.requestId);
+    pending.sendResponse(message);
+  }
   if (message?.ok && typeof message.blocking === "boolean") {
+    nativeConnected = true;
+    currentSession = message.session || null;
     applyState(message.blocking, message.sites || []);
   }
 }
@@ -105,6 +123,29 @@ chrome.webNavigation.onBeforeNavigate.addListener(details => {
   if (now - (lastAttempts.get(matched) || 0) < 3000) return;
   lastAttempts.set(matched, now);
   port.postMessage({ action: "recordAttempt", target: matched });
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.action === "getConnectionStatus") {
+    sendResponse({ connected: nativeConnected, session: currentSession });
+    return;
+  }
+  if (message?.action !== "stopSession") return;
+  if (!nativeConnected || !port) {
+    sendResponse({ ok: false, error: "notConnected" });
+    return;
+  }
+
+  const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const timeout = setTimeout(() => {
+    const pending = pendingRequests.get(requestId);
+    if (!pending) return;
+    pendingRequests.delete(requestId);
+    pending.sendResponse({ ok: false, error: "timeout" });
+  }, 5000);
+  pendingRequests.set(requestId, { sendResponse, timeout });
+  port.postMessage({ action: "stopSession", requestId });
+  return true;
 });
 
 connect();

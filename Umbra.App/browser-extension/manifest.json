@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Umbra Blocker",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Blocks distracting websites while Umbra focus protection is active.",
   "icons": {
     "16": "icons/icon16.png",
@@ -12,6 +12,10 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAurZPnuwt3ug2RU1uzqoMaVH5CbVhCKYYbGvvPAW+LWs9LFTcJ5yMP9DTxKxxTD++WbvXMbeki2UGvvkYmSBLbk5gySpJYIr/XZ6srJVd4pc9kTWZu6ExrRNXPR/NKlhuK64GRohMozl54MzSbpwcvgadP3kkME9yKwqrM7PscITiTJTExi0h0/99sI4thuydbtU54rZxtyIEppn8WfeOba/3Nq/KZj6ZvyLrJQwHMydF8qxmjUI/yvM7uZ8jwst2bEhmFVAjs0A4DcH8CxyDpiTXh3XduEJs6ESiCNZI6uSE3L7daSjChEqRoPmuYF/7ANQ3G97GMC5R8dxTVt/S0QIDAQAB",
   "permissions": ["nativeMessaging", "declarativeNetRequest", "webNavigation", "tabs"],
   "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Umbra Blocker",
+    "default_popup": "popup.html"
+  },
   "background": { "service_worker": "background.js" },
   "web_accessible_resources": [{
     "resources": ["blocked.html", "blocked.css"],

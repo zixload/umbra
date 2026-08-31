@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Umbra Blocker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img src="icons/icon128.png" alt="">
+      <div>
+        <p class="eyebrow">UMBRA</p>
+        <h1>Umbra Blocker</h1>
+      </div>
+    </header>
+
+    <section id="connected" class="status" hidden>
+      <span class="status-dot"></span>
+      <div class="status-copy">
+        <strong>Umbra is connected</strong>
+        <p id="idle-message">No focus session is running.</p>
+        <div id="active-session" hidden>
+          <div class="session-heading">
+            <span id="session-phase">Focus session</span>
+            <span id="session-cycle"></span>
+          </div>
+          <strong id="session-name">Focus session</strong>
+          <div id="session-time">00:00</div>
+          <button id="stop-session" class="stop-button" type="button">Stop session</button>
+          <p id="session-error" class="session-error" hidden></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="not-connected" class="install-card">
+      <h2>Part of the full Umbra app</h2>
+      <p>Install Umbra to create blocklists, start focus sessions, and protect your browser.</p>
+      <button id="install" type="button">Install Umbra</button>
+    </section>
+
+    <a id="website" href="https://github.com/zixload/umbra" target="_blank" rel="noreferrer">View Umbra on GitHub</a>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

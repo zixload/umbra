@@ -18,24 +18,32 @@ try
         if (BrowserHostLifecycle.IsStopRequested()) break;
 
         object response;
+        string? requestId = null;
         try
         {
             using var message = JsonDocument.Parse(payload);
             var action = message.RootElement.TryGetProperty("action", out var actionElement) ? actionElement.GetString() : "getState";
+            requestId = message.RootElement.TryGetProperty("requestId", out var requestIdElement)
+                ? requestIdElement.GetString()
+                : null;
             if (action == "recordAttempt" && message.RootElement.TryGetProperty("target", out var targetElement))
             {
                 BlockAttemptHistory.Record(targetElement.GetString() ?? "", "site");
-                response = new { ok = true };
+                response = new { ok = true, requestId };
+            }
+            else if (action == "stopSession")
+            {
+                var stopped = BrowserSessionControl.TryStop(out var session, out var error);
+                response = CreateStateResponse(requestId, stopped, error, session);
             }
             else
             {
-                var state = BrowserBlockingState.GetCurrent();
-                response = new { ok = true, blocking = state.Blocking, sites = state.Sites };
+                response = CreateStateResponse(requestId, true, null, BrowserSessionControl.GetStatus());
             }
         }
         catch (Exception error)
         {
-            response = new { ok = false, error = error.Message };
+            response = new { ok = false, error = error.Message, requestId };
         }
 
         var json = JsonSerializer.SerializeToUtf8Bytes(response, Json.Options);
@@ -49,6 +57,20 @@ catch (Exception error)
 {
     var version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version;
     CrashReporter.Write(error, "browser-host", version?.ToString(3));
+}
+
+static object CreateStateResponse(string? requestId, bool ok, string? error, BrowserSessionStatus session)
+{
+    var state = BrowserBlockingState.GetCurrent();
+    return new
+    {
+        ok,
+        error,
+        requestId,
+        blocking = state.Blocking,
+        sites = state.Sites,
+        session,
+    };
 }
 
 static async Task<bool> ReadExactlyAsync(Stream stream, byte[] buffer)
