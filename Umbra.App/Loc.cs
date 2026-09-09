@@ -59,6 +59,7 @@ public static class Loc
         ["focus.start"] = ("Démarrer", "Start"),
         ["focus.stop"] = ("Arrêter", "Stop"),
         ["focus.locked"] = ("Verrouillé (hard mode)", "Locked (hard mode)"),
+        ["focus.schedule.disable"] = ("Désactiver cette plage", "Disable this schedule"),
         ["focus.stop.confirming"] = ("Confirme dans {0}s…", "Confirm in {0}s…"),
         ["focus.stop.confirm"] = ("Confirmer l'arrêt", "Confirm stop"),
         ["focus.stop.cancel"] = ("Annuler", "Cancel"),

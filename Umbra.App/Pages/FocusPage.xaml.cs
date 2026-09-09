@@ -21,6 +21,16 @@ public partial class FocusPage : System.Windows.Controls.UserControl
     // aucune confirmation en attente.
     private DateTime? _pendingStopUntil;
 
+    // Non-null quand c'est une PLAGE (pas une session manuelle) qui occupe
+    // la vue active - avant, StopButton restait masqué dans ce cas ("rien à
+    // arrêter depuis ici, c'est le planning qui pilote"), ce qui laissait
+    // une plage hors hard mode totalement inaccessible dès qu'elle couvrait
+    // l'heure courante : l'onglet Schedules (seul autre endroit pour la
+    // désactiver) est lui-même masqué tant qu'une plage est active. Une
+    // plage hard mode reste volontairement non désactivable depuis ici
+    // (StopButton.IsEnabled=false, voir RefreshSessionUi).
+    private Period? _activePeriod;
+
     // Suivi des transitions pour déclencher les sons de fin de session/pause
     // (Réglages) - même logique de garde que WatchdogLoop.Enforcer côté
     // Core : jamais de son au tout premier tick (une session déjà en cours
@@ -166,6 +176,7 @@ public partial class FocusPage : System.Windows.Controls.UserControl
 
         if (active)
         {
+            _activePeriod = null;
             var remaining = TimeSpan.FromSeconds(Session.RemainingSeconds(s));
             SessionStatusText.Text = s.HardMode ? Loc.T("focus.status.active.hard") : Loc.T("focus.status.active");
             SessionTimeText.Text = $"{(int)remaining.TotalMinutes:D2}:{remaining.Seconds:D2}";
@@ -201,6 +212,7 @@ public partial class FocusPage : System.Windows.Controls.UserControl
         else if (activePeriod is not null)
         {
             _pendingStopUntil = null;
+            _activePeriod = activePeriod;
             CancelStopLink.Visibility = Visibility.Collapsed;
             double remainingSeconds, totalSeconds;
             if (activePeriod.PomodoroMode)
@@ -216,7 +228,21 @@ public partial class FocusPage : System.Windows.Controls.UserControl
             }
             var remaining = TimeSpan.FromSeconds(remainingSeconds);
             SessionTimeText.Text = $"{(int)remaining.TotalMinutes:D2}:{remaining.Seconds:D2}";
-            StopButton.Visibility = Visibility.Collapsed; // rien à arrêter depuis ici : c'est le planning qui pilote
+            if (activePeriod.HardMode)
+            {
+                // Verrouillée volontairement (voir WatchdogLoop.Enforcer côté
+                // Core) - affichée pour que ce soit clair que ce n'est pas un
+                // oubli, mais rien à cliquer : la seule échappatoire reste de
+                // fermer le watchdog élevé depuis le Gestionnaire des tâches.
+                StopButton.Content = Loc.T("focus.locked");
+                StopButton.IsEnabled = false;
+            }
+            else
+            {
+                StopButton.Content = Loc.T("focus.schedule.disable");
+                StopButton.IsEnabled = true;
+            }
+            StopButton.Visibility = Visibility.Visible;
             ActiveRingHost.Children.Clear();
             ActiveRingHost.Children.Add(RingVisual.BuildFocusTimer(245, remainingSeconds / totalSeconds,
                 (System.Windows.Media.Brush)FindResource("ControlStrokeColorDefaultBrush"),
@@ -225,6 +251,7 @@ public partial class FocusPage : System.Windows.Controls.UserControl
         else
         {
             _pendingStopUntil = null;
+            _activePeriod = null;
             CancelStopLink.Visibility = Visibility.Collapsed;
             UpdatePreview();
         }
@@ -407,6 +434,21 @@ public partial class FocusPage : System.Windows.Controls.UserControl
 
     private void StopButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_activePeriod is { } period)
+        {
+            if (period.HardMode) return; // pas cliquable de toute façon (IsEnabled=false), filet de sécurité
+            var data = Periods.Load();
+            var target = data.Periods.FirstOrDefault(p => p.Id == period.Id);
+            if (target is not null)
+            {
+                target.Enabled = false;
+                Periods.Save(data);
+            }
+            _activePeriod = null;
+            RefreshSessionUi();
+            return;
+        }
+
         var s = Session.Load();
         if (!Session.CanStop(s)) return;
 
