@@ -26,6 +26,7 @@
   <ItemGroup>
     <Content Include="browser-extension\**\*" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Ambient\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Sounds\**\*" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\Backgrounds\**\*" CopyToOutputDirectory="PreserveNewest" />
     <!-- Only redistributable static presets ship with public builds. Users
          can still select their own PNG/JPG/MP4 files from Settings. -->

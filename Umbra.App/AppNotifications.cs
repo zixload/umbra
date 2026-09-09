@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Microsoft.Toolkit.Uwp.Notifications;
 
 namespace Umbra.App;
@@ -13,6 +15,12 @@ namespace Umbra.App;
 internal static class AppNotifications
 {
     private static bool _initialized;
+
+    // Un URI ms-appx:/// (le chemin habituel pour un son de toast custom) ne
+    // marche que pour une app empaquetée (MSIX) - Umbra ne l'est pas, donc
+    // il faut un file:/// vers le chemin absolu du fichier une fois installé
+    // (AppContext.BaseDirectory, comme les autres assets embarqués).
+    private static readonly Uri NotificationSound = new(Path.Combine(AppContext.BaseDirectory, "Assets", "Sounds", "notification.mp3"));
 
     public static void Initialize()
     {
@@ -34,10 +42,15 @@ internal static class AppNotifications
     {
         try
         {
-            new ToastContentBuilder()
+            var builder = new ToastContentBuilder()
                 .AddText(title)
-                .AddText(message)
-                .Show();
+                .AddText(message);
+            // Un seul son pour toutes les notifications (fin de session, fin
+            // de pause, échec de mise à jour...) puisqu'elles passent toutes
+            // par cette méthode - si le fichier a disparu, AddAudio met
+            // simplement le son par défaut de Windows, jamais d'exception.
+            if (File.Exists(NotificationSound.LocalPath)) builder.AddAudio(NotificationSound);
+            builder.Show();
         }
         catch
         {
