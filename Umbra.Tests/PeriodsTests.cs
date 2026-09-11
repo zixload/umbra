@@ -53,6 +53,23 @@ public class PeriodsTests
     }
 
     [Fact]
+    public void RecurringPeriod_CrossingMidnight_StaysActiveAfterMidnight_OnASingleCheckedDay()
+    {
+        // Régression : une plage cochée sur un seul jour ("lundi soir
+        // 22h-2h") s'arrêtait de bloquer pile à minuit, parce que le jour
+        // était vérifié par rapport à aujourd'hui (mardi après minuit) au
+        // lieu du jour où la plage avait légitimement démarré (lundi).
+        var monday = new DateTime(2026, 1, 5, 23, 30, 0); // lundi 5 janv 2026, 23:30
+        var afterMidnight = new DateTime(2026, 1, 6, 0, 30, 0); // mardi 6 janv 2026, 00:30 - toujours dans la fenêtre 22h-2h
+        var p = MakePeriod(true, true, days: new List<int> { (int)monday.DayOfWeek }, startTime: "22:00", endTime: "02:00"); // lundi uniquement
+
+        Assert.Single(Periods.GetActivePeriods(new PeriodsData { Periods = new List<Period> { p } }, afterMidnight));
+
+        var pastEnd = new DateTime(2026, 1, 6, 2, 30, 0); // mardi 02:30 - la fenêtre est bien terminée
+        Assert.Empty(Periods.GetActivePeriods(new PeriodsData { Periods = new List<Period> { p } }, pastEnd));
+    }
+
+    [Fact]
     public void OneOffPeriod_ActiveOnlyToday_WithinWindow_NoMidnightCrossing()
     {
         var now = new DateTime(2026, 8, 11, 12, 0, 0);

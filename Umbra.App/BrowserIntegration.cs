@@ -57,11 +57,21 @@ internal static class BrowserIntegration
         }
     }
 
-    public static void OpenStorePage() => Process.Start(new ProcessStartInfo
+    // ShellExecute échoue s'il n'y a aucun navigateur par défaut enregistré,
+    // ou si l'association http est cassée : sans ce garde, un simple clic sur
+    // "Installer l'extension" levait une exception non gérée.
+    public static bool OpenStorePage()
     {
-        FileName = StoreUrl,
-        UseShellExecute = true,
-    });
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = StoreUrl, UseShellExecute = true });
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public static async Task<bool> StopNativeHostsForUpdateAsync(CancellationToken cancellationToken = default)
     {

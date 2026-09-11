@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Windows.Media;
 using Microsoft.Toolkit.Uwp.Notifications;
 
 namespace Umbra.App;
@@ -16,11 +18,26 @@ internal static class AppNotifications
 {
     private static bool _initialized;
 
-    // Un URI ms-appx:/// (le chemin habituel pour un son de toast custom) ne
-    // marche que pour une app empaquetée (MSIX) - Umbra ne l'est pas, donc
-    // il faut un file:/// vers le chemin absolu du fichier une fois installé
-    // (AppContext.BaseDirectory, comme les autres assets embarqués).
-    private static readonly Uri NotificationSound = new(Path.Combine(AppContext.BaseDirectory, "Assets", "Sounds", "notification.mp3"));
+    // ms-appx:/// (custom toast audio "normal") ne marche que pour une app
+    // empaquetée (MSIX). file:/// vers le chemin absolu semblait une
+    // alternative raisonnable pour une app non empaquetée, mais vérifié en
+    // conditions réelles : le son ne joue pas du tout (silence, pas de
+    // fallback sur le son par défaut). Ce n'est donc pas un mécanisme
+    // documenté/fiable ici - le son custom est joué directement par l'app
+    // via MediaPlayer (même mécanisme déjà fiable pour les sons d'ambiance,
+    // voir AmbientSoundService) plutôt que de dépendre du système de toast
+    // pour ça ; le toast lui-même est rendu silencieux (silent:true avec un
+    // src ms-winsoundevent: valide en placeholder) pour ne pas superposer un
+    // second son par-dessus.
+    private static readonly string NotificationSoundPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Sounds", "notification.mp3");
+
+    // Garde une racine GC pour chaque lecture en cours - un MediaPlayer local
+    // sans référence externe (même abonné à son propre évènement MediaEnded,
+    // une référence circulaire non rattachée à une racine) peut être
+    // ramassé par le GC en plein milieu de la lecture. Une liste plutôt
+    // qu'un seul champ : deux notifications rapprochées ne doivent pas se
+    // couper l'une l'autre.
+    private static readonly List<MediaPlayer> ActivePlayers = new();
 
     public static void Initialize()
     {
@@ -42,20 +59,34 @@ internal static class AppNotifications
     {
         try
         {
-            var builder = new ToastContentBuilder()
+            new ToastContentBuilder()
                 .AddText(title)
-                .AddText(message);
-            // Un seul son pour toutes les notifications (fin de session, fin
-            // de pause, échec de mise à jour...) puisqu'elles passent toutes
-            // par cette méthode - si le fichier a disparu, AddAudio met
-            // simplement le son par défaut de Windows, jamais d'exception.
-            if (File.Exists(NotificationSound.LocalPath)) builder.AddAudio(NotificationSound);
-            builder.Show();
+                .AddText(message)
+                .AddAudio(new Uri("ms-winsoundevent:Notification.Default"), silent: true)
+                .Show();
         }
         catch
         {
             // Best-effort : une notification manquée ne doit jamais faire
             // planter le flux appelant (fin de session, mise à jour, etc.).
+        }
+        PlayNotificationSound();
+    }
+
+    private static void PlayNotificationSound()
+    {
+        try
+        {
+            if (!File.Exists(NotificationSoundPath)) return;
+            var player = new MediaPlayer { Volume = 0.8 };
+            ActivePlayers.Add(player);
+            player.MediaEnded += (_, _) => { player.Close(); ActivePlayers.Remove(player); };
+            player.Open(new Uri(NotificationSoundPath, UriKind.Absolute));
+            player.Play();
+        }
+        catch
+        {
+            // Best-effort, comme le toast lui-même.
         }
     }
 }

@@ -26,6 +26,11 @@ public class AppSettings
     public List<string> RecentFloatingFocusBackgrounds { get; set; } = new();
     public double FloatingFocusBlur { get; set; } = 12;
     public bool ShowSessionTasks { get; set; } // désactivé par défaut, opt-in depuis Réglages
+    // Volume par son d'ambiance (id -> 0..1), pour retrouver son mix après
+    // un redémarrage - avant, chaque son repartait à 0.55 à chaque relance
+    // et même à chaque arrêt/relance du son, alors que le réglage par son
+    // est une fonctionnalité mise en avant.
+    public Dictionary<string, double> AmbientVolumes { get; set; } = new();
     // Heure suggérée (History.GetSuggestedStartHour) que l'utilisateur a
     // explicitement ignorée dans l'onglet Schedules - ne pas la reproposer
     // tant que le pic d'usage reste sur cette même heure (voir PeriodsPage).
@@ -34,6 +39,12 @@ public class AppSettings
 
 public static class Settings
 {
+    // Durée la plus longue qu'un slider de la page Focus puisse atteindre
+    // (FocusPage.xaml : 120 min en pomodoro, 240 en session libre). Au-delà,
+    // une durée prédéfinie était silencieusement ramenée au maximum du
+    // slider : le réglage avait simplement l'air cassé.
+    public const int MaxPresetMinutes = 240;
+
     private static AppSettings DefaultSettings() => new();
 
     public static AppSettings Load()

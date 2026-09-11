@@ -74,24 +74,44 @@ internal sealed class TrayIcon : IDisposable
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT p);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint RegisterWindowMessageW(string lpString);
+
+    // Quand l'Explorateur Windows redémarre (plantage, ou redémarrage manuel
+    // depuis le Gestionnaire des tâches), la zone de notification est
+    // recréée vide et diffuse ce message enregistré à toutes les fenêtres de
+    // premier niveau. Sans le traiter, l'icône d'Umbra disparaissait pour de
+    // bon : l'app continuait de tourner (et le watchdog de bloquer) sans
+    // aucun moyen visible d'ouvrir le tableau de bord ou d'arrêter la
+    // session, puisque la croix masque vers le systray.
+    private static readonly uint TaskbarCreatedMessage = RegisterWindowMessageW("TaskbarCreated");
+
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X; public int Y; }
 
     private readonly IntPtr _hwnd;
     private readonly IntPtr _hIcon;
     private readonly System.Drawing.Icon _icon;
+    private readonly string _tooltip;
     private readonly List<(uint Id, string Label, Action? OnClick)> _menuItems = new();
     private HwndSource? _source;
+    private bool _disposed;
 
     public TrayIcon(Window window, string tooltip)
     {
         _hwnd = new WindowInteropHelper(window).EnsureHandle();
         _icon = LoadIcon();
         _hIcon = _icon.Handle;
+        _tooltip = tooltip;
 
         _source = HwndSource.FromHwnd(_hwnd);
         _source?.AddHook(WndProc);
 
+        AddIcon();
+    }
+
+    private void AddIcon()
+    {
         var data = new NOTIFYICONDATA
         {
             cbSize = Marshal.SizeOf<NOTIFYICONDATA>(),
@@ -100,7 +120,7 @@ internal sealed class TrayIcon : IDisposable
             uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage = CallbackMessage,
             hIcon = _hIcon,
-            szTip = tooltip,
+            szTip = _tooltip,
         };
         Shell_NotifyIconW(0 /* NIM_ADD */, ref data);
     }
@@ -115,7 +135,9 @@ internal sealed class TrayIcon : IDisposable
         return new System.Drawing.Icon(streamInfo.Stream);
     }
 
-    public event Action? DoubleClicked;
+    // Clic gauche ou double-clic sur l'icône : action principale (afficher le
+    // tableau de bord), comme n'importe quelle app à icône systray.
+    public event Action? Activated;
     public event Action? MenuOpening;
 
     public void SetMenu(IEnumerable<(string Label, Action? OnClick)> items)
@@ -131,15 +153,26 @@ internal sealed class TrayIcon : IDisposable
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
+        if (TaskbarCreatedMessage != 0 && msg == (int)TaskbarCreatedMessage)
+        {
+            if (!_disposed) AddIcon();
+            return IntPtr.Zero;
+        }
+
         if (msg != CallbackMessage) return IntPtr.Zero;
 
         var evt = lParam.ToInt32();
-        if (evt == WM_LBUTTONDBLCLK)
+        // Le clic gauche ouvrait le menu contextuel, ce qui rendait le
+        // double-clic inatteignable : TrackPopupMenuEx est modal, il
+        // s'ouvrait dès le premier WM_LBUTTONUP et avalait le second clic,
+        // donc DoubleClicked ne se déclenchait jamais. Convention Windows :
+        // gauche = action principale, droite = menu.
+        if (evt is WM_LBUTTONUP or WM_LBUTTONDBLCLK)
         {
-            DoubleClicked?.Invoke();
+            Activated?.Invoke();
             handled = true;
         }
-        else if (evt == WM_RBUTTONUP || evt == WM_LBUTTONUP)
+        else if (evt == WM_RBUTTONUP)
         {
             ShowMenu();
             handled = true;
@@ -177,6 +210,8 @@ internal sealed class TrayIcon : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         var data = new NOTIFYICONDATA { cbSize = Marshal.SizeOf<NOTIFYICONDATA>(), hWnd = _hwnd, uID = 1 };
         Shell_NotifyIconW(2 /* NIM_DELETE */, ref data);
         _source?.RemoveHook(WndProc);

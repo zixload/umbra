@@ -127,7 +127,11 @@ chrome.webNavigation.onBeforeNavigate.addListener(details => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.action === "getConnectionStatus") {
-    sendResponse({ connected: nativeConnected, session: currentSession });
+    // activeSites reflète déjà tout ce qui bloque réellement (session +
+    // plages + AlwaysBlocklist confondus, voir BrowserBlockingState côté
+    // app) - le popup peut donc savoir "ça bloque" même quand
+    // BrowserSessionControl (session uniquement) ne voit aucune session.
+    sendResponse({ connected: nativeConnected, session: currentSession, blocking: activeSites.length > 0, sites: activeSites });
     return;
   }
   if (message?.action !== "stopSession") return;

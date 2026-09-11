@@ -15,6 +15,7 @@ public partial class FloatingFocusWindow : Wpf.Ui.Controls.FluentWindow
     private static FloatingFocusWindow? _instance;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly string _clockStyle;
+    private string? _lastArtKey;
 
     public static void ShowOrActivate()
     {
@@ -30,7 +31,11 @@ public partial class FloatingFocusWindow : Wpf.Ui.Controls.FluentWindow
         ApplyBackground();
         _timer.Tick += async (_, _) => { RefreshSession(); await RefreshSpotify(); };
         _timer.Start();
-        Closed += (_, _) => { _timer.Stop(); BackgroundVideo.Stop(); _instance = null; };
+        // Close() en plus de Stop() : Stop met juste la lecture en pause au
+        // début, c'est Close() qui relâche réellement la ressource média.
+        // Sans ça, ouvrir/fermer la fenêtre flottante en boucle avec un MP4
+        // de fond accumule des ressources natives jusqu'au passage du GC.
+        Closed += (_, _) => { _timer.Stop(); BackgroundVideo.Stop(); BackgroundVideo.Close(); _instance = null; };
         RefreshSession();
         _ = RefreshSpotify();
     }
@@ -160,7 +165,20 @@ public partial class FloatingFocusWindow : Wpf.Ui.Controls.FluentWindow
         var info = await SpotifyControl.GetNowPlayingAsync();
         SpotifyTitle.Text = string.IsNullOrWhiteSpace(info.Title) ? Loc.T("nowplaying.none") : info.Title;
         SpotifyArtist.Text = info.Artist ?? "";
-        if (info.Thumbnail is not { Length: > 0 }) { SpotifyThumbnail.Source = null; return; }
+        if (info.Thumbnail is not { Length: > 0 })
+        {
+            SpotifyThumbnail.Source = null;
+            _lastArtKey = null;
+            return;
+        }
+        // Ce refresh tourne chaque seconde : sans ce garde, la pochette était
+        // décodée en BitmapImage 60 fois par minute alors qu'elle ne change
+        // qu'au changement de titre (même principe que _lastPlayingTrack dans
+        // NowPlayingBar).
+        var artKey = $"{info.Title}{info.Artist}{info.Thumbnail.Length}";
+        if (artKey == _lastArtKey) return;
+        _lastArtKey = artKey;
+
         var image = new BitmapImage();
         using var stream = new MemoryStream(info.Thumbnail);
         image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = stream; image.EndInit(); image.Freeze();

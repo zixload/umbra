@@ -169,7 +169,9 @@ public partial class SettingsPage : UserControl
 
     private void AddPreset_Click(object sender, RoutedEventArgs e)
     {
-        if (!int.TryParse(NewPresetBox.Text.Trim(), out var minutes) || minutes <= 0) return;
+        // Plafond aligné sur les sliders de la page Focus : une durée
+        // au-delà y était ramenée au maximum sans rien dire.
+        if (!int.TryParse(NewPresetBox.Text.Trim(), out var minutes) || minutes <= 0 || minutes > Settings.MaxPresetMinutes) return;
         if (!_settings.DurationPresets.Contains(minutes))
         {
             _settings.DurationPresets.Add(minutes);
@@ -655,26 +657,45 @@ public partial class SettingsPage : UserControl
 
     private static bool IsStartupEnabled()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
-        return key?.GetValue(RunValueName) != null;
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+            return key?.GetValue(RunValueName) != null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
+    // La clé Run est en écriture pour l'utilisateur courant dans la quasi
+    // totalité des cas, mais une stratégie de groupe ou un antivirus peuvent
+    // la verrouiller : sans ce garde, le refus remontait en exception non
+    // gérée depuis un gestionnaire de clic.
     private void StartupToggle_Changed(object sender, RoutedEventArgs e)
     {
         if (!_loaded) return;
-        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-        if (key == null) return;
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+            if (key == null) return;
 
-        if (StartupToggle.IsChecked == true)
-        {
-            var exePath = Process.GetCurrentProcess().MainModule?.FileName;
-            if (exePath != null) key.SetValue(RunValueName, $"\"{exePath}\"");
+            if (StartupToggle.IsChecked == true)
+            {
+                var exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                if (exePath != null) key.SetValue(RunValueName, $"\"{exePath}\"");
+            }
+            else
+            {
+                key.DeleteValue(RunValueName, throwOnMissingValue: false);
+            }
+            RefreshStartupStatus();
         }
-        else
+        catch
         {
-            key.DeleteValue(RunValueName, throwOnMissingValue: false);
+            StartupToggle.IsChecked = IsStartupEnabled();
+            StartupStatusText.Text = Loc.T("settings.startup.failed");
         }
-        RefreshStartupStatus();
     }
 
     private void SettingsPage_Loaded(object sender, RoutedEventArgs e)
@@ -782,8 +803,9 @@ public partial class SettingsPage : UserControl
             BrowserExtensionStatusText.Text = Loc.T("settings.extension.error");
             return;
         }
-        BrowserIntegration.OpenStorePage();
-        BrowserExtensionStatusText.Text = Loc.T("settings.extension.ready");
+        BrowserExtensionStatusText.Text = BrowserIntegration.OpenStorePage()
+            ? Loc.T("settings.extension.ready")
+            : Loc.T("settings.extension.error");
     }
 
     private void ClearHistory_Click(object sender, RoutedEventArgs e)

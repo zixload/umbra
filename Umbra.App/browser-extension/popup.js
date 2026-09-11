@@ -34,13 +34,27 @@ document.getElementById("stop-session").addEventListener("click", () => {
 });
 
 function renderStatus(response) {
-  if (chrome.runtime.lastError || !response?.connected) return;
+  // Avant, un déconnexion (Umbra fermée pendant que la popup est ouverte)
+  // laissait l'ancien état affiché pour de bon - décompte qui continue de
+  // tourner vers 00:00 alors que plus rien n'est vraiment suivi côté app.
+  if (chrome.runtime.lastError || !response?.connected) {
+    document.getElementById("not-connected").hidden = false;
+    document.getElementById("connected").hidden = true;
+    sessionDeadline = 0;
+    return;
+  }
   document.getElementById("not-connected").hidden = true;
   document.getElementById("connected").hidden = false;
 
   const session = response.session;
   const active = Boolean(session?.active);
-  document.getElementById("idle-message").hidden = active;
+  // Une plage (pas une session manuelle) peut bloquer des sites sans que
+  // BrowserSessionControl (qui ne connaît que Session, pas Periods) le
+  // sache - sans ça, la popup disait "aucune session" alors que des sites
+  // étaient bel et bien bloqués, sans aucune explication.
+  const scheduleBlocking = !active && Boolean(response.blocking);
+  document.getElementById("idle-message").hidden = active || scheduleBlocking;
+  document.getElementById("schedule-blocking").hidden = !scheduleBlocking;
   document.getElementById("active-session").hidden = !active;
   if (!active) return;
 

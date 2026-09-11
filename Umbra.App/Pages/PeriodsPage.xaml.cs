@@ -16,6 +16,11 @@ public partial class PeriodsPage : UserControl
 
     private PeriodsData _data = Periods.Load();
     private int? _suggestedHour;
+    // Non-null pendant que le formulaire "Nouvelle plage" modifie une plage
+    // EXISTANTE (voir StartEditing) au lieu d'en créer une nouvelle - c'est
+    // une référence directe vers l'objet déjà présent dans _data.Periods,
+    // donc le muter puis appeler Periods.Save(_data) suffit à persister.
+    private Period? _editingPeriod;
     private readonly HashSet<int> _selectedDays = new();
     private readonly List<ToggleButton> _dayButtons = new();
     private List<SavedBlocklist> _savedBlocklists = new();
@@ -167,6 +172,19 @@ public partial class PeriodsPage : UserControl
             Margin = new Thickness(10, 0, 0, 0),
         };
 
+        // Éditer une plage verrouillée permettrait de contourner le hard mode
+        // aussi sûrement que la désactiver/supprimer (reculer EndTime, décocher
+        // HardMode...) - même garde que pour enabledBox/removeBtn.
+        var editBtn = new Wpf.Ui.Controls.Button
+        {
+            Icon = new SymbolIcon { Symbol = SymbolRegular.Edit24 },
+            Appearance = ControlAppearance.Secondary,
+            ToolTip = Loc.T("periods.edit"),
+            IsEnabled = !locked,
+            Margin = new Thickness(0, 0, 6, 0),
+        };
+        editBtn.Click += (_, _) => StartEditing(p);
+
         var removeBtn = new Wpf.Ui.Controls.Button
         {
             Content = locked ? Loc.T("focus.locked") : Loc.T("periods.remove"),
@@ -177,8 +195,13 @@ public partial class PeriodsPage : UserControl
         {
             _data.Periods.Remove(p);
             Periods.Save(_data);
+            if (_editingPeriod == p) ResetForm();
             Render();
         };
+
+        var actions = new StackPanel { Orientation = Orientation.Horizontal };
+        actions.Children.Add(editBtn);
+        actions.Children.Add(removeBtn);
 
         var left = new StackPanel { Orientation = Orientation.Horizontal };
         if (p.HardMode) left.Children.Add(new SymbolIcon { Symbol = SymbolRegular.LockClosed24, Margin = new Thickness(0, 0, 6, 0), Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
@@ -186,7 +209,53 @@ public partial class PeriodsPage : UserControl
         left.Children.Add(enabledBox);
         left.Children.Add(detail);
 
-        return new CardControl { Header = left, Content = removeBtn, Margin = new Thickness(0, 0, 0, 6) };
+        return new CardControl { Header = left, Content = actions, Margin = new Thickness(0, 0, 0, 6) };
+    }
+
+    // Remplit le formulaire "Nouvelle plage" avec les valeurs de p et bascule
+    // AddPeriodButton en mode "enregistrer les modifications" (voir
+    // AddPeriod_Click) - pas de lien fiable vers un éventuel profil de
+    // blocage d'origine (Apps/Sites sont copiés puis indépendants une fois
+    // la plage créée), donc BlocklistCombo reste sur "Aucune" : modifier les
+    // apps/sites d'une plage existante se fait via un nouveau choix explicite.
+    private void StartEditing(Period p)
+    {
+        _editingPeriod = p;
+        NewPeriodExpander.IsExpanded = true;
+        NewPeriodExpander.Header = Loc.T("periods.editing");
+        NameBox.Text = p.Name;
+        StartBox.Text = p.StartTime;
+        EndBox.Text = p.EndTime;
+        foreach (var b in _dayButtons) b.IsChecked = false;
+        _selectedDays.Clear();
+        for (var i = 0; i < DayIndexToDow.Length; i++)
+        {
+            if (p.Days.Contains(DayIndexToDow[i])) _dayButtons[i].IsChecked = true;
+        }
+        BlocklistCombo.SelectedIndex = 0;
+        HardModeToggle.IsChecked = p.HardMode;
+        PomodoroModeToggle.IsChecked = p.PomodoroMode;
+        AddPeriodButton.Content = Loc.T("periods.save.changes");
+        CancelEditButton.Content = Loc.T("periods.edit.cancel");
+        CancelEditButton.Visibility = Visibility.Visible;
+    }
+
+    private void CancelEdit_Click(object sender, RoutedEventArgs e) => ResetForm();
+
+    private void ResetForm()
+    {
+        foreach (var b in _dayButtons) b.IsChecked = false;
+        _selectedDays.Clear();
+        NameBox.Text = Loc.T("periods.name.default");
+        StartBox.Text = "22:00";
+        EndBox.Text = "07:00";
+        BlocklistCombo.SelectedIndex = 0;
+        HardModeToggle.IsChecked = false;
+        PomodoroModeToggle.IsChecked = false;
+        _editingPeriod = null;
+        NewPeriodExpander.Header = Loc.T("periods.new");
+        AddPeriodButton.Content = Loc.T("periods.add");
+        CancelEditButton.Visibility = Visibility.Collapsed;
     }
 
     // "13.00" au lieu de "13:00" ne lève aucune erreur au clic : PeriodCoversNow
@@ -211,6 +280,27 @@ public partial class PeriodsPage : UserControl
             return;
         }
 
+        if (_editingPeriod is { } editing)
+        {
+            editing.Name = name;
+            editing.Days = _selectedDays.ToList();
+            editing.StartTime = startTime;
+            editing.EndTime = endTime;
+            editing.HardMode = HardModeToggle.IsChecked == true;
+            editing.PomodoroMode = PomodoroModeToggle.IsChecked == true;
+            if (BlocklistCombo.SelectedIndex > 0)
+            {
+                var chosen = _savedBlocklists[BlocklistCombo.SelectedIndex - 1];
+                editing.Apps = new List<string>(chosen.Apps);
+                editing.Sites = new List<string>(chosen.Sites);
+            }
+            Periods.Save(_data);
+            ResetForm();
+            Render();
+            RenderSuggestion();
+            return;
+        }
+
         var period = new Period
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -231,12 +321,7 @@ public partial class PeriodsPage : UserControl
         }
         _data.Periods.Add(period);
         Periods.Save(_data);
-
-        foreach (var b in _dayButtons) b.IsChecked = false;
-        _selectedDays.Clear();
-        BlocklistCombo.SelectedIndex = 0;
-        HardModeToggle.IsChecked = false;
-        PomodoroModeToggle.IsChecked = false;
+        ResetForm();
         Render();
         RenderSuggestion();
     }

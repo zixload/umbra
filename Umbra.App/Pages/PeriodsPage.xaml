@@ -72,7 +72,13 @@
                     </StackPanel>
                     <ui:ToggleSwitch x:Name="PomodoroModeToggle" DockPanel.Dock="Right" />
                 </DockPanel>
-                <ui:Button x:Name="AddPeriodButton" Appearance="Primary" HorizontalAlignment="Left" Click="AddPeriod_Click" />
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button x:Name="AddPeriodButton" Appearance="Primary" HorizontalAlignment="Left" Click="AddPeriod_Click" />
+                    <!-- Visible seulement en train de modifier une plage
+                         existante (voir StartEditing/ResetForm) - revient au
+                         formulaire "nouvelle plage" sans rien enregistrer. -->
+                    <ui:Button x:Name="CancelEditButton" Appearance="Secondary" Margin="8,0,0,0" Visibility="Collapsed" Click="CancelEdit_Click" />
+                </StackPanel>
             </StackPanel>
         </ui:CardExpander>
 

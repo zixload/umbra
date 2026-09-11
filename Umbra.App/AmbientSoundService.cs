@@ -1,5 +1,7 @@
 using System.IO;
 using System.Windows.Media;
+using System.Windows.Threading;
+using Umbra.Core;
 
 namespace Umbra.App;
 
@@ -15,8 +17,46 @@ public static class AmbientSoundService
     }
 
     public const int MaxActive = 3;
+    private const double DefaultVolume = 0.55;
     private static readonly Dictionary<string, PlayerState> Players = new(StringComparer.OrdinalIgnoreCase);
     public static event Action? Changed;
+
+    // Le slider de volume (NowPlayingBar) déclenche SetVolume en continu
+    // pendant le glissement : on regroupe les écritures plutôt que de
+    // réécrire settings.json des dizaines de fois par glissement.
+    private static readonly DispatcherTimer SaveVolumesTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
+
+    static AmbientSoundService()
+    {
+        SaveVolumesTimer.Tick += (_, _) => { SaveVolumesTimer.Stop(); PersistVolumes(); };
+    }
+
+    private static void PersistVolumes()
+    {
+        try
+        {
+            var settings = Settings.Load();
+            foreach (var state in Players.Values) settings.AmbientVolumes[state.Sound.Id] = state.Player.Volume;
+            Settings.Save(settings);
+        }
+        catch
+        {
+            // Best-effort : perdre un réglage de volume ne doit jamais
+            // interrompre la lecture en cours.
+        }
+    }
+
+    private static double SavedVolume(string id)
+    {
+        try
+        {
+            return Settings.Load().AmbientVolumes.TryGetValue(id, out var volume) ? Math.Clamp(volume, 0, 1) : DefaultVolume;
+        }
+        catch
+        {
+            return DefaultVolume;
+        }
+    }
 
     public static IReadOnlyList<AmbientSound> Catalog { get; } =
     [
@@ -52,15 +92,22 @@ public static class AmbientSoundService
 
     public static bool Toggle(AmbientSound sound)
     {
-        if (Players.Remove(sound.Id, out var existing))
+        if (Players.ContainsKey(sound.Id))
         {
-            existing.Player.Close();
+            // Enregistrer AVANT de retirer le lecteur : PersistVolumes ne
+            // parcourt que les sons actifs, donc un volume changé dans les
+            // 700 ms précédant l'arrêt serait perdu (le timer n'a pas encore
+            // tiré) et le son repartirait au volume par défaut au rallumage.
+            PersistVolumes();
+            SaveVolumesTimer.Stop();
+            Players.Remove(sound.Id, out var existing);
+            existing!.Player.Close();
             Changed?.Invoke();
             return true;
         }
         if (Players.Count >= MaxActive) return false;
 
-        var player = new MediaPlayer { Volume = 0.55 };
+        var player = new MediaPlayer { Volume = SavedVolume(sound.Id) };
         var path = Path.Combine(AppContext.BaseDirectory, "Assets", "Ambient", "Sounds", sound.AudioFile);
         player.Open(new Uri(path, UriKind.Absolute));
         player.MediaEnded += (_, _) => { player.Position = TimeSpan.Zero; player.Play(); };
@@ -76,12 +123,17 @@ public static class AmbientSoundService
     {
         if (!Players.TryGetValue(id, out var state)) return;
         state.Player.Volume = Math.Clamp(volume, 0, 1);
+        SaveVolumesTimer.Stop();
+        SaveVolumesTimer.Start();
     }
 
     public static void Remove(string id)
     {
-        if (!Players.Remove(id, out var state)) return;
-        state.Player.Close();
+        if (!Players.ContainsKey(id)) return;
+        PersistVolumes(); // même raison que dans Toggle : garder le volume du son qu'on retire
+        SaveVolumesTimer.Stop();
+        Players.Remove(id, out var state);
+        state!.Player.Close();
         Changed?.Invoke();
     }
 }

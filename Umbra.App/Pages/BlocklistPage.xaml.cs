@@ -163,6 +163,15 @@ public partial class BlocklistPage : UserControl
 
         foreach (var list in _saved)
         {
+            var editBtn = new Wpf.Ui.Controls.Button
+            {
+                Icon = new SymbolIcon { Symbol = SymbolRegular.Edit24 },
+                Appearance = ControlAppearance.Secondary,
+                ToolTip = Loc.T("blocklist.saved.edit"),
+                Margin = new Thickness(0, 0, 6, 0),
+            };
+            editBtn.Click += (_, _) => EditSaved(list);
+
             var deleteBtn = new Wpf.Ui.Controls.Button
             {
                 Icon = new SymbolIcon { Symbol = SymbolRegular.Delete24 },
@@ -172,6 +181,7 @@ public partial class BlocklistPage : UserControl
             deleteBtn.Click += (_, _) => DeleteSaved(list);
 
             var actions = new StackPanel { Orientation = Orientation.Horizontal };
+            actions.Children.Add(editBtn);
             actions.Children.Add(deleteBtn);
 
             var row = new Grid();
@@ -203,6 +213,27 @@ public partial class BlocklistPage : UserControl
         if (list.Apps.Count > 0) lines.Add($"{Loc.T("blocklist.apps")} : {string.Join(", ", list.Apps)}");
         if (list.Sites.Count > 0) lines.Add($"{Loc.T("blocklist.sites")} : {string.Join(", ", list.Sites)}");
         return lines.Count > 0 ? string.Join("\n", lines) : Loc.T("blocklist.saved.empty");
+    }
+
+    // Charge le profil dans la liste "de travail" ci-dessous (comme un
+    // preset) et pré-remplit le nom - modifier apps/sites puis cliquer sur
+    // le même bouton d'enregistrement (à côté du champ nom) écrase le profil
+    // existant, SaveList_Click faisant déjà un upsert par nom. Remplace ce
+    // qu'il y avait dans la liste active : acceptable, un profil se recharge
+    // facilement si besoin, pas de boîte de confirmation pour ça.
+    private void EditSaved(SavedBlocklist list)
+    {
+        _data.Apps = new List<string>(list.Apps);
+        _data.Sites = new List<string>(list.Sites);
+        Blocklist.Save(_data);
+        NewListNameBox.Text = list.Name;
+        ItemsExpander.IsExpanded = true;
+        Render();
+        // La liste ci-dessous est celle réellement utilisée pendant une
+        // session - remplacée tout de suite (pas juste un aperçu), donc
+        // autant le dire plutôt que de le faire en silence.
+        PresetFeedbackText.Text = string.Format(Loc.T("blocklist.saved.editing"), list.Name);
+        PresetFeedbackText.Visibility = Visibility.Visible;
     }
 
     private void DeleteSaved(SavedBlocklist list)

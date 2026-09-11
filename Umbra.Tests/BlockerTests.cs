@@ -68,6 +68,55 @@ public class BlockerTests : IDisposable
         Assert.Contains("127.0.0.1 localhost", after);
     }
 
+    // Écriture du fichier hosts interrompue (process tué, coupure, disque
+    // plein) : le bloc reste sans son marqueur de fin. Avant, StripBlock
+    // renonçait et RemoveSiteBlock devenait un no-op - les domaines
+    // restaient bloqués pour toujours.
+    [Fact]
+    public void RemoveSiteBlock_CleansUpTruncatedBlock_MissingEndMarker()
+    {
+        ResetHosts("127.0.0.1 localhost\n\n# --- UMBRANATIVE BLOCK START ---\n127.0.0.1 youtube.com\n127.0.0.1 www.you");
+
+        Blocker.RemoveSiteBlock();
+
+        var after = ReadHosts();
+        Assert.DoesNotContain("youtube.com", after);
+        Assert.DoesNotContain("UMBRANATIVE", after);
+        Assert.Contains("127.0.0.1 localhost", after);
+    }
+
+    [Fact]
+    public void RemoveSiteBlock_CleansUpEveryBlock_WhenSeveralAccumulated()
+    {
+        ResetHosts(
+            "127.0.0.1 localhost\n\n"
+            + "# --- UMBRANATIVE BLOCK START ---\n127.0.0.1 reddit.com\n# --- UMBRANATIVE BLOCK END ---\n\n"
+            + "# --- UMBRANATIVE BLOCK START ---\n127.0.0.1 twitter.com\n# --- UMBRANATIVE BLOCK END ---\n");
+
+        Blocker.RemoveSiteBlock();
+
+        var after = ReadHosts();
+        Assert.DoesNotContain("reddit.com", after);
+        Assert.DoesNotContain("twitter.com", after);
+        Assert.DoesNotContain("UMBRANATIVE", after);
+        Assert.Contains("127.0.0.1 localhost", after);
+    }
+
+    // La copie de secours sert justement à réparer un fichier hosts resté
+    // bloqué : elle ne doit jamais contenir elle-même un bloc orphelin.
+    [Fact]
+    public void ApplySiteBlock_BacksUpHostsWithoutAnyOrphanedBlock()
+    {
+        ResetHosts("127.0.0.1 localhost\n\n# --- UMBRANATIVE BLOCK START ---\n127.0.0.1 orphan.com\n# --- UMBRANATIVE BLOCK END ---\n");
+
+        Blocker.ApplySiteBlock(new[] { "site-a.com" });
+
+        var backup = File.ReadAllText(Config.HostsBackup);
+        Assert.DoesNotContain("orphan.com", backup);
+        Assert.DoesNotContain("UMBRANATIVE", backup);
+        Assert.Contains("127.0.0.1 localhost", backup);
+    }
+
     [Fact]
     public void ApplySiteBlock_ReplacingExistingBlock_DoesNotDuplicateOriginalContent()
     {

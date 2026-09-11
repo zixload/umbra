@@ -103,8 +103,8 @@ before it runs a downloaded installer.
 | Area | What Umbra provides |
 | --- | --- |
 | Focus | Pomodoro cycles, free timers, recurring schedules and named tasks |
-| Protection | Application blocking, website blocking, reusable profiles and optional Hard mode |
-| Sounds | Thirteen built-in ambient soundscapes with independent volume controls and three-sound mixing |
+| Protection | Application blocking, website blocking, reusable profiles, an always-on permanent blocklist independent of any session, and optional Hard mode |
+| Sounds | Twenty-two built-in ambient soundscapes with independent volume controls and three-sound mixing |
 | Media | Spotify and other Windows media titles, artists and artwork in the focus experience |
 | Floating timer | Draggable, resizable and always-on-top, with image or MP4 backgrounds and blur |
 | Statistics | Daily/weekly/monthly totals, streaks, longest session, activity heatmap, blocked attempts and top-played tracks |
@@ -155,6 +155,9 @@ a custom video background.
 Website blocking uses the Manifest V3 **Umbra Blocker** extension and a local
 native-messaging bridge installed with the Windows app. The extension is not a
 standalone product: Umbra must be installed and running on the same computer.
+Its toolbar popup shows whether Umbra is connected, the current session's
+name, phase and countdown, and includes a Stop button (respecting Hard mode)
+so a running session can be checked or ended without switching to the app.
 
 The bridge is registered automatically for:
 

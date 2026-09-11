@@ -10,6 +10,11 @@ public class NowPlayingInfo
     public string Title { get; set; } = "";
     public string Artist { get; set; } = "";
     public byte[]? Thumbnail { get; set; }
+    // Le réglage de volume passe par le mixeur Windows ciblé sur Spotify.exe
+    // (voir WithSpotifyAudioSession) : il n'a aucun effet sur un autre
+    // lecteur, donc l'UI doit pouvoir masquer le curseur dans ce cas plutôt
+    // que d'afficher un contrôle qui ne fait rien.
+    public bool IsSpotify { get; set; }
     // Position de lecture dans le morceau - permet de distinguer une même
     // chanson qui boucle (la position retombe brutalement vers 0) d'une
     // lecture continue, ce que le titre/artiste seuls ne peuvent pas dire
@@ -26,17 +31,26 @@ public class NowPlayingInfo
 // PowerShell à démarrer à chaque appel.
 public static class SpotifyControl
 {
-    private static async Task<GlobalSystemMediaTransportControlsSession?> FindSpotifySessionAsync()
+    private static bool IsSpotifySession(GlobalSystemMediaTransportControlsSession session) =>
+        session.SourceAppUserModelId?.Contains("Spotify", StringComparison.OrdinalIgnoreCase) == true;
+
+    // Spotify d'abord (c'est le cas d'usage principal, et le seul dont on
+    // sache piloter le volume), sinon la session média courante de Windows -
+    // navigateur, Apple Music, VLC, foobar... Avant, seul Spotify était
+    // reconnu : tout autre lecteur affichait "Aucune lecture en cours" en
+    // permanence et ne comptait jamais rien dans les statistiques d'écoute,
+    // alors que les GSMTC exposent tous les lecteurs de la même façon.
+    private static async Task<GlobalSystemMediaTransportControlsSession?> FindSessionAsync()
     {
         var mgr = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-        return mgr.GetSessions().FirstOrDefault(s => s.SourceAppUserModelId?.Contains("Spotify", StringComparison.OrdinalIgnoreCase) == true);
+        return mgr.GetSessions().FirstOrDefault(IsSpotifySession) ?? mgr.GetCurrentSession();
     }
 
     public static async Task<NowPlayingInfo> GetNowPlayingAsync()
     {
         try
         {
-            var session = await FindSpotifySessionAsync();
+            var session = await FindSessionAsync();
             if (session == null) return new NowPlayingInfo { Playing = false };
 
             var props = await session.TryGetMediaPropertiesAsync();
@@ -69,6 +83,7 @@ public static class SpotifyControl
                 Artist = props.Artist ?? "",
                 Thumbnail = thumbnail,
                 Position = timeline.Position,
+                IsSpotify = IsSpotifySession(session),
             };
         }
         catch
@@ -81,7 +96,7 @@ public static class SpotifyControl
     {
         try
         {
-            var session = await FindSpotifySessionAsync();
+            var session = await FindSessionAsync();
             if (session == null) return false;
 
             return action switch

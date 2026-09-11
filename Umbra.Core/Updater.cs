@@ -57,6 +57,13 @@ public static class Updater
     private const string ChecksumsAssetName = "SHA256SUMS.txt";
     private static readonly string ApiUrl = $"https://api.github.com/repos/{Repo}/releases/latest";
     private static readonly Regex VersionPattern = new(@"\d+(?:\.\d+){1,3}", RegexOptions.Compiled);
+    // 10 minutes, c'est le budget d'un téléchargement de 150 Mo sur une
+    // mauvaise connexion. Pour la simple interrogation de l'API GitHub c'est
+    // absurde : une connexion qui pend bloquait la vérification dix minutes,
+    // et comme _updateGate reste pris pendant ce temps (App.xaml.cs), le
+    // bouton "Vérifier les mises à jour" ne faisait alors strictement rien,
+    // sans le moindre message.
+    private static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(20);
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(10) };
 
     static Updater()
@@ -80,14 +87,17 @@ public static class Updater
 
     public static async Task<UpdateCheckResult> CheckForUpdateAsync(string currentVersion, CancellationToken cancellationToken = default)
     {
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(CheckTimeout);
+        var token = budget.Token;
         try
         {
-            using var response = await Http.GetAsync(ApiUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await Http.GetAsync(ApiUrl, HttpCompletionOption.ResponseHeadersRead, token);
             if (!response.IsSuccessStatusCode)
                 return new UpdateCheckResult { CurrentVersion = currentVersion };
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            var release = await JsonSerializer.DeserializeAsync<GitHubRelease>(stream, cancellationToken: cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(token);
+            var release = await JsonSerializer.DeserializeAsync<GitHubRelease>(stream, cancellationToken: token);
             if (release?.TagName is null)
                 return new UpdateCheckResult { CurrentVersion = currentVersion };
 
@@ -141,8 +151,9 @@ public static class Updater
         if (!TryReadExpectedSha256(checksumText, update.InstallerName, out var expectedHash))
             throw new InvalidDataException("The installer checksum is missing from SHA256SUMS.txt.");
 
-        var updatesDirectory = Path.Combine(Config.DataDir, "updates");
+        var updatesDirectory = UpdatesDirectory;
         Directory.CreateDirectory(updatesDirectory);
+        CleanupDownloadedInstallers(update.InstallerName);
         var destinationPath = Path.Combine(updatesDirectory, update.InstallerName);
         var temporaryPath = destinationPath + ".download";
 
@@ -175,8 +186,39 @@ public static class Updater
         }
         catch
         {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            // Le nettoyage ne doit pas remplacer l'erreur d'origine : si le
+            // fichier partiel est encore verrouillé, File.Delete lèverait une
+            // IOException qui masquerait la vraie cause de l'échec.
+            try { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); } catch { }
             throw;
+        }
+    }
+
+    public static string UpdatesDirectory => Path.Combine(Config.DataDir, "updates");
+
+    // Chaque mise à jour laissait son installateur (~156 Mo) dans
+    // %AppData%\UmbraNative\data\updates, et rien ne l'a jamais supprimé :
+    // après une quinzaine de versions, plusieurs gigaoctets de fichiers morts
+    // s'accumulaient en silence chez l'utilisateur. On ne garde au plus que
+    // l'installateur en cours de téléchargement.
+    public static void CleanupDownloadedInstallers(string? keepFileName = null)
+    {
+        try
+        {
+            if (!Directory.Exists(UpdatesDirectory)) return;
+            foreach (var path in Directory.EnumerateFiles(UpdatesDirectory).ToList())
+            {
+                if (keepFileName is not null
+                    && string.Equals(Path.GetFileName(path), keepFileName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // Un installateur encore en cours d'exécution reste verrouillé :
+                // il partira au prochain passage.
+                try { File.Delete(path); } catch { }
+            }
+        }
+        catch
+        {
+            // le ménage ne doit jamais faire échouer une mise à jour
         }
     }
 

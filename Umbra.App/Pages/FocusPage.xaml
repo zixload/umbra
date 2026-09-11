@@ -50,7 +50,7 @@
                 </StackPanel>
 
                 <Grid x:Name="ConfigPanel" Margin="24,48,24,24">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition x:Name="TabsRow" Height="286"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition x:Name="TabsRow" Height="286"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                     <Grid Grid.Row="0" Margin="0,0,0,12">
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
                         <ui:TextBox x:Name="QuestNameBox" Grid.Column="0"/>
@@ -103,6 +103,12 @@
                     </DockPanel>
                     <ui:Button Grid.Row="3" x:Name="StartButton" Appearance="Primary" Height="46" HorizontalAlignment="Stretch" Click="StartButton_Click"/>
                     <TextBlock Grid.Row="4" x:Name="WatchdogStatusText" FontSize="12" Opacity="0.6" HorizontalAlignment="Center" Margin="0,12,0,0"/>
+                    <!-- "Toujours bloqué" (AlwaysBlocklist) n'a ni session ni
+                         plage - sans cette ligne, désactiver la dernière
+                         session/plage active donnait l'impression que plus
+                         rien n'est bloqué, alors que ces entrées continuent
+                         de bloquer en silence. -->
+                    <TextBlock Grid.Row="5" x:Name="AlwaysBlockedStatusText" FontSize="12" Opacity="0.6" HorizontalAlignment="Center" Margin="0,4,0,0" Visibility="Collapsed"/>
                 </Grid>
             </Grid>
 

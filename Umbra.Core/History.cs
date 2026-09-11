@@ -306,6 +306,35 @@ public static class History
         return mondayFirst.Select(dow => new WeekdayRow(dow, (int)Math.Round(minutesByDow[dow]))).ToList();
     }
 
+    // Contrairement à GetWeekdayBreakdown (agrège par jour de semaine sur 30
+    // jours - "le lundi, tu bosses en moyenne combien" - donc un seul lundi
+    // travaillé sur le mois entier suffit à allumer le rond "L" même les
+    // semaines où rien n'a été fait), ceci reflète UNIQUEMENT la semaine
+    // civile en cours (lundi -> dimanche) : c'est ce qu'il faut à côté d'un
+    // "streak" pour ne pas donner l'impression trompeuse que toute la
+    // semaine est déjà faite.
+    public static List<WeekdayRow> GetCurrentWeekBreakdown(DateTime? nowOpt = null)
+    {
+        var now = nowOpt ?? DateTime.Now;
+        var entries = Load();
+        var dow = ((int)now.DayOfWeek + 6) % 7; // 0 = lundi
+        var weekStart = now.Date.AddDays(-dow);
+        var minutesByDay = new Dictionary<string, double>();
+        foreach (var e in entries)
+        {
+            var key = DayKey(e.EndedAt);
+            minutesByDay[key] = minutesByDay.GetValueOrDefault(key) + e.FocusedMinutes;
+        }
+        var result = new List<WeekdayRow>();
+        for (var i = 0; i < 7; i++)
+        {
+            var day = weekStart.AddDays(i);
+            var key = DayKey(new DateTimeOffset(day).ToUnixTimeMilliseconds());
+            result.Add(new WeekdayRow((int)day.DayOfWeek, (int)Math.Round(minutesByDay.GetValueOrDefault(key))));
+        }
+        return result;
+    }
+
     public static int? GetSuggestedStartHour(DateTime? nowOpt = null)
     {
         var now = nowOpt ?? DateTime.Now;

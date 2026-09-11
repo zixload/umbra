@@ -76,11 +76,17 @@ public partial class App : Application
         _singleInstance.Listen(RequestDashboardActivation);
 
         _trayIcon = new TrayIcon(_dashboard, "Umbra");
-        _trayIcon.DoubleClicked += ShowDashboard;
+        _trayIcon.Activated += ShowDashboard;
         _trayIcon.MenuOpening += RefreshTrayMenu;
         RefreshTrayMenu();
 
         VerifyPendingUpdate();
+
+        // Un installateur encore présent au démarrage a déjà fait son travail
+        // (c'est lui qui vient de relancer l'app) ou a été abandonné : dans
+        // les deux cas c'est 156 Mo de poids mort. En tâche de fond pour ne
+        // pas retarder l'affichage du tableau de bord.
+        _ = Task.Run(() => Updater.CleanupDownloadedInstallers());
 
         _reminderTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
         _reminderTimer.Tick += (_, _) => CheckSmartReminder();
@@ -155,8 +161,16 @@ public partial class App : Application
         }
         else
         {
-            items.Add((string.Format(Loc.T("focus.quick"), 25), () => QuickStart(25)));
-            items.Add((string.Format(Loc.T("focus.quick"), 60), () => QuickStart(60)));
+            // Les durées prédéfinies (Réglages) ne servaient qu'à positionner
+            // les sliders au premier affichage de Focus, alors que le menu
+            // systray proposait 25 et 60 en dur : ajouter une durée ne créait
+            // donc aucun raccourci nulle part. C'est ici qu'elles prennent
+            // leur sens - les trois premières deviennent des démarrages
+            // rapides depuis la zone de notification.
+            var presets = Settings.Load().DurationPresets.Where(m => m is > 0 and <= Settings.MaxPresetMinutes).Take(3).ToList();
+            if (presets.Count == 0) presets.Add(25);
+            foreach (var minutes in presets)
+                items.Add((string.Format(Loc.T("focus.quick"), minutes), () => QuickStart(minutes)));
             items.Add(("-", null));
         }
 
@@ -366,10 +380,44 @@ public partial class App : Application
         return UpdateReadiness.Evaluate(Session.Load(), Periods.Load(), DateTime.Now) != UpdateBlockReason.None;
     }
 
+    // Une exception non gérée sur le thread UI fermait l'application. Pour un
+    // bloqueur, c'est le pire scénario possible : le watchdog élevé est un
+    // process séparé, il continue d'appliquer le blocage (hosts, pare-feu,
+    // fermeture d'apps) alors que le tableau de bord ET l'icône systray
+    // viennent de disparaître - plus aucun moyen d'arrêter la session. On
+    // journalise, on prévient, et on continue.
+    private int _recoveredErrorCount;
+    private DateTime _recoveredErrorWindowUtc;
+
+    private bool TryRecoverFromUiError()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _recoveredErrorWindowUtc > TimeSpan.FromMinutes(1))
+        {
+            _recoveredErrorWindowUtc = now;
+            _recoveredErrorCount = 0;
+        }
+        _recoveredErrorCount++;
+        // Une erreur isolée se rattrape ; une boucle d'erreurs (rendu cassé,
+        // état corrompu) ne se rattrape pas en la masquant - au-delà de cinq
+        // en une minute on laisse l'application tomber proprement plutôt que
+        // de la faire tourner dans un état incohérent.
+        if (_recoveredErrorCount > 5) return false;
+        if (_recoveredErrorCount == 1)
+        {
+            try { AppNotifications.Show(Loc.T("crash.recovered.title"), Loc.T("crash.recovered.body")); }
+            catch { /* une notification qui échoue ne doit pas relancer un crash */ }
+        }
+        return true;
+    }
+
     private void RegisterCrashHandlers()
     {
         DispatcherUnhandledException += (_, args) =>
+        {
             CrashReporter.Write(args.Exception, "dispatcher", InstalledVersion);
+            if (TryRecoverFromUiError()) args.Handled = true;
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             CrashReporter.Write(
                 args.ExceptionObject as Exception ?? new Exception(args.ExceptionObject?.ToString() ?? "Unknown fatal error"),

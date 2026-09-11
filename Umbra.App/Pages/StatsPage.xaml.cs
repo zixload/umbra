@@ -378,7 +378,7 @@ public partial class StatsPage : UserControl
         StreakRecordText.Visibility = s.BestStreakDays > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         var dayLetters = Loc.DayLetters;
-        var weekdays = History.GetWeekdayBreakdown(30);
+        var weekdays = History.GetCurrentWeekBreakdown();
         var today = (int)DateTime.Now.DayOfWeek;
         WeekdayRow.Children.Clear();
         for (var i = 0; i < weekdays.Count; i++)
@@ -452,7 +452,11 @@ public partial class StatsPage : UserControl
         var days = minutes / 1440;
         var hours = minutes % 1440 / 60;
         var mins = minutes % 60;
-        if (days > 0) return hours > 0 ? $"{days}d {hours}h" : $"{days}d";
+        // "d" est l'abréviation anglaise - en français c'est "j" (jour),
+        // contrairement à "min"/"h" qui sont déjà identiques dans les deux
+        // langues et n'avaient donc jamais révélé cet oubli.
+        var dayUnit = Loc.Language == "fr" ? "j" : "d";
+        if (days > 0) return hours > 0 ? $"{days}{dayUnit} {hours}h" : $"{days}{dayUnit}";
         return mins > 0 ? $"{hours}h {mins}min" : $"{hours}h";
     }
 

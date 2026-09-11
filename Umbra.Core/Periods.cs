@@ -112,9 +112,18 @@ public static class Periods
 
         if (p.Recurring)
         {
-            if (!p.Days.Contains((int)now.DayOfWeek)) return false; // DayOfWeek : 0=dimanche..6=samedi, comme Date.getDay() en JS
-            if (start < end) return mins >= start && mins < end;
-            return mins >= start || mins < end; // plage récurrente qui traverse minuit (ex: 22:00 -> 02:00)
+            // DayOfWeek : 0=dimanche..6=samedi, comme Date.getDay() en JS.
+            if (start < end) return p.Days.Contains((int)now.DayOfWeek) && mins >= start && mins < end;
+            // Plage récurrente qui traverse minuit (ex: 22:00 -> 02:00, cochée
+            // sur un seul jour comme "lundi soir") : après minuit (mins < end),
+            // c'est le jour où la plage a démarré - donc HIER - qui doit être
+            // coché, pas aujourd'hui. Vérifier uniquement now.DayOfWeek ici
+            // coupait le blocage pile à minuit pour toute plage cochée sur un
+            // seul jour, alors que GetTiming/GetPomodoroTiming (indépendants
+            // de Days) continuaient d'afficher un compte à rebours normal.
+            if (mins >= start) return p.Days.Contains((int)now.DayOfWeek);
+            if (mins < end) return p.Days.Contains((int)now.AddDays(-1).DayOfWeek);
+            return false;
         }
         // plage ponctuelle : bornée au jour choisi, pas de traversée de minuit
         if (p.Date != TodayKey(now)) return false;

@@ -14,8 +14,35 @@ public static class AtomicFile
 {
     public static void WriteAllText(string path, string content)
     {
-        var tmp = path + ".tmp";
+        // Nom temporaire propre au process : le tableau de bord, le watchdog
+        // élevé et l'hôte navigateur écrivent les MÊMES fichiers
+        // (session.json, history.json, block_attempts.json...). Avec un
+        // ".tmp" partagé, deux écritures simultanées se disputaient
+        // littéralement le même fichier intermédiaire et l'une des deux
+        // échouait sur un partage refusé. Suffixé par PID plutôt qu'aléatoire
+        // pour qu'une écriture interrompue laisse au plus un orphelin par
+        // process, jamais une collection qui grossit.
+        var tmp = $"{path}.{Environment.ProcessId}.tmp";
         File.WriteAllText(tmp, content);
-        File.Move(tmp, path, overwrite: true);
+        MoveWithRetry(tmp, path);
+    }
+
+    // Le renommage lui-même peut échouer un court instant : un autre process
+    // remplaçant la même destination au même moment, ou un antivirus qui
+    // tient le fichier ouvert le temps de l'analyser.
+    private static void MoveWithRetry(string tmp, string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(tmp, path, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < 3)
+            {
+                Thread.Sleep(20 * (attempt + 1));
+            }
+        }
     }
 }

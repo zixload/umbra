@@ -267,6 +267,11 @@ public partial class FocusPage : System.Windows.Controls.UserControl
 
         WatchdogStatusText.Text = WatchdogSupervisor.IsAlive() ? Loc.T("focus.watchdog.active") : Loc.T("focus.watchdog.inactive");
 
+        var always = AlwaysBlocklist.Load();
+        var alwaysCount = always.Apps.Count + always.Sites.Count;
+        AlwaysBlockedStatusText.Visibility = alwaysCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (alwaysCount > 0) AlwaysBlockedStatusText.Text = string.Format(Loc.T("focus.always.active"), alwaysCount);
+
 
         CheckSoundTransitions(s);
     }

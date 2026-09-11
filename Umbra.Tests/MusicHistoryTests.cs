@@ -52,4 +52,20 @@ public class MusicHistoryTests : IDisposable
         MusicHistory.Flush();
         Assert.NotEqual(persistedAfterNewPlay, File.ReadAllText(Config.MusicHistoryFile));
     }
+
+    [Fact]
+    public void Flush_KeepsArtworkOnlyForTheMostPlayedTracks()
+    {
+        for (var i = 1; i <= 160; i++)
+            MusicHistory.RecordPlayback($"Track {i}", "Artist", i, new byte[] { 7 });
+
+        MusicHistory.Flush();
+
+        var all = MusicHistory.GetAllTracks();
+        Assert.Equal(160, all.Count);
+        Assert.NotNull(all[0].Thumbnail);   // le mieux classé garde sa pochette
+        Assert.NotNull(all[149].Thumbnail); // dernier dans le budget
+        Assert.Null(all[150].Thumbnail);    // au-delà : pochette libérée
+        Assert.Equal(160, all[0].Seconds);  // le temps d'écoute, lui, reste intact
+    }
 }

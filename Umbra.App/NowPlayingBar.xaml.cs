@@ -179,10 +179,23 @@ public partial class NowPlayingBar : UserControl
             _lastPosition = null;
         }
 
+        // Le volume passe par le mixeur Windows ciblé sur Spotify.exe : sur
+        // un autre lecteur (navigateur, VLC...) le curseur ne ferait
+        // strictement rien tout en restant manipulable, et GetVolume()
+        // renverrait 1 - il vaut mieux le masquer que d'afficher un contrôle
+        // mort.
+        VolumeSlider.Visibility = info.IsSpotify ? Visibility.Visible : Visibility.Collapsed;
+
+        // Si le bouton est relâché en dehors du curseur (glissement au-delà
+        // de son extrémité), PreviewMouseLeftButtonUp ne se déclenche jamais
+        // dessus et le drapeau restait bloqué à true : le curseur cessait
+        // alors définitivement de se resynchroniser avec le volume réel.
+        if (Mouse.LeftButton == MouseButtonState.Released) _isAdjustingVolume = false;
+
         // On ne réécrit pas la position du slider pendant que l'utilisateur
         // le fait glisser, sinon le refresh périodique (toutes les 3s) lutte
         // avec le geste de la souris.
-        if (!_isAdjustingVolume) VolumeSlider.Value = SpotifyControl.GetVolume();
+        if (info.IsSpotify && !_isAdjustingVolume) VolumeSlider.Value = SpotifyControl.GetVolume();
 
         if (info.Thumbnail is { Length: > 0 })
         {

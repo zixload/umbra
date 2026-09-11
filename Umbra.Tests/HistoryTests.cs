@@ -284,6 +284,38 @@ public class HistoryTests : IDisposable
     }
 
     [Fact]
+    public void GetCurrentWeekBreakdown_OnlyCountsTheCurrentCalendarWeek_NotOlderWeeks()
+    {
+        // Régression : le rond du panneau "streak" utilisait GetWeekdayBreakdown
+        // (agrégat sur 30 jours), donc une seule session un lundi d'il y a 3
+        // semaines suffisait à allumer TOUS les jours de la semaine affichée,
+        // même ceux non faits cette semaine-ci - trompeur juste à côté d'un
+        // streak de 1 jour ("Streak.md" screenshot signalé par l'utilisateur).
+        var now = new DateTime(2026, 1, 19, 12, 0, 0); // lundi 19 janvier 2026
+        var threeWeeksAgoMonday = now.AddDays(-21); // lundi 29 décembre 2025 - même jour de semaine, semaine différente
+        History.Save(new List<HistoryEntry> { Entry(new DateTimeOffset(threeWeeksAgoMonday).ToUnixTimeMilliseconds(), "a", 30) });
+
+        var thisWeek = History.GetCurrentWeekBreakdown(now);
+        Assert.All(thisWeek, row => Assert.Equal(0, row.Minutes));
+
+        var last30Days = History.GetWeekdayBreakdown(30, now);
+        Assert.Contains(last30Days, row => row.Dow == (int)threeWeeksAgoMonday.DayOfWeek && row.Minutes > 0);
+    }
+
+    [Fact]
+    public void GetCurrentWeekBreakdown_AttributesMinutesToTheCorrectDayInThisWeek()
+    {
+        var monday = new DateTime(2026, 1, 19, 9, 0, 0); // lundi 19 janvier 2026
+        var wednesday = monday.AddDays(2);
+        History.Save(new List<HistoryEntry> { Entry(new DateTimeOffset(wednesday).ToUnixTimeMilliseconds(), "a", 25) });
+
+        var week = History.GetCurrentWeekBreakdown(monday);
+        var wedRow = week.First(r => r.Dow == (int)wednesday.DayOfWeek);
+        Assert.Equal(25, wedRow.Minutes);
+        Assert.All(week.Where(r => r.Dow != (int)wednesday.DayOfWeek), r => Assert.Equal(0, r.Minutes));
+    }
+
+    [Fact]
     public void GetSuggestedStartHour_UsesRecentSessionStartTimes()
     {
         History.Save(new List<HistoryEntry>

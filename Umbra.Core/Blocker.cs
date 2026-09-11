@@ -6,24 +6,45 @@ public static class Blocker
 {
     private static string ReadHosts() => File.ReadAllText(Config.HostsPath);
 
+    // Retire TOUS les blocs Umbra, y compris un bloc tronqué dont le
+    // marqueur de fin manque. C'est le cas qui comptait : si le WriteAllText
+    // du fichier hosts est interrompu (process tué, disque plein, coupure),
+    // le fichier garde un bloc sans marqueur de fin. L'ancienne version
+    // sortait alors sans rien retirer, donc RemoveSiteBlock devenait un
+    // no-op et les domaines restaient bloqués indéfiniment, sans aucune
+    // session active pour l'expliquer - impossible à débloquer autrement
+    // qu'en éditant le fichier hosts à la main.
     private static string StripBlock(string content)
     {
-        var startIdx = content.IndexOf(Config.MarkStart, StringComparison.Ordinal);
-        if (startIdx == -1) return content;
-        var endIdx = content.IndexOf(Config.MarkEnd, StringComparison.Ordinal);
-        if (endIdx == -1) return content;
-        var before = content[..startIdx];
-        var after = content[(endIdx + Config.MarkEnd.Length)..];
-        return before.TrimEnd() + "\n" + after.TrimStart();
+        while (true)
+        {
+            var startIdx = content.IndexOf(Config.MarkStart, StringComparison.Ordinal);
+            if (startIdx == -1) return content;
+
+            // Recherche à partir de startIdx : un marqueur de fin orphelin
+            // situé AVANT le début produisait des indices croisés et
+            // recopiait le bloc au lieu de l'enlever.
+            var endIdx = content.IndexOf(Config.MarkEnd, startIdx, StringComparison.Ordinal);
+            var before = content[..startIdx];
+            // Le bloc est toujours ajouté en fin de fichier (voir
+            // ApplySiteBlock) : sans marqueur de fin, tout ce qui suit le
+            // marqueur de début nous appartient.
+            var after = endIdx == -1 ? "" : content[(endIdx + Config.MarkEnd.Length)..];
+            content = before.TrimEnd() + "\n" + after.TrimStart();
+        }
     }
 
     public static void ApplySiteBlock(IEnumerable<string> sites)
     {
+        var content = StripBlock(ReadHosts());
         if (!File.Exists(Config.HostsBackup))
         {
-            File.WriteAllText(Config.HostsBackup, ReadHosts());
+            // Sauvegarde du contenu NETTOYÉ : si un watchdog précédent a été
+            // tué en laissant un bloc orphelin, sauvegarder le fichier tel
+            // quel figeait ce blocage dans la copie de secours censée servir
+            // à s'en sortir.
+            File.WriteAllText(Config.HostsBackup, content);
         }
-        var content = StripBlock(ReadHosts());
         var lines = new List<string> { Config.MarkStart };
         foreach (var site in sites)
         {
